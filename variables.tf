@@ -1,54 +1,87 @@
+variable "project" {
+  type    = string
+  default = "techsprint"
+}
+
+variable "environment" {
+  type    = string
+  default = "testing"
+}
+
 variable "location" {
-  description = "Azure regija"
+  type    = string
+  default = "francecentral"
+}
+
+variable "users_csv_path" {
   type        = string
-  default     = "westeurope"
+  description = "Putanja do CSV datoteke (ime;prezime;rola)"
+  default     = "users.csv"
 }
 
 variable "admin_username" {
-  description = "Admin korisnik za sve VM-ove"
+  type    = string
+  default = "azureadmin"
+}
+
+variable "ssh_public_key" {
   type        = string
-  default     = "azureadmin"
+  description = "SSH javni ključ. Ako prazan, Terraform generira privremeni."
+  default     = ""
+  sensitive   = true
 }
 
-variable "admin_ssh_public_key" {
-  description = "SSH javni ključ za pristup VM-ovima"
-  type        = string
+variable "allowed_ssh_cidr" {
+  type    = string
+  default = "0.0.0.0/0"
 }
 
-variable "users" {
-  description = "Lista korisnika iz CSV-a"
-  type = list(object({
-    first_name = string
-    last_name  = string
-    username   = string
-    role       = string
-  }))
+variable "app_vm_size" {
+  type    = string
+  default = "Standard_B1s"
 }
 
-variable "vm_size_app" {
-  description = "Veličina aplikacijskih VM-ova (2 vCPU, 4GB RAM)"
-  type        = string
-  default     = "Standard_B1s"
+variable "jump_vm_size" {
+  type    = string
+  default = "Standard_B1s"
 }
 
-variable "vm_size_jump" {
-  description = "Veličina jump host VM-a"
-  type        = string
-  default     = "Standard_B1s"
+variable "os_disk_size_gb" {
+  type    = number
+  default = 64
 }
 
-variable "os_image" {
-  description = "OS image - Rocky Linux ekvivalent (RHEL compatible)"
-  type = object({
-    publisher = string
-    offer     = string
-    sku       = string
-    version   = string
-  })
-  default = {
-    publisher = "OpenLogic"
-    offer     = "CentOS"
-    sku       = "8_5-gen2"
-    version   = "latest"
-  }
+variable "data_disk_size_gb" {
+  type    = number
+  default = 32
+}
+
+variable "image_publisher" {
+  type    = string
+  default = "Canonical"
+}
+
+variable "image_offer" {
+  type    = string
+  default = "0001-com-ubuntu-server-jammy"
+}
+
+variable "image_sku" {
+  type    = string
+  default = "22_04-lts-gen2"
+}
+
+variable "image_version" {
+  type    = string
+  default = "latest"
+}
+
+variable "lead_vnet_cidr" {
+  type    = string
+  default = "10.0.0.0/16"
+}
+
+variable "developer_vnet_base_octet" {
+  type    = number
+  default = 10
 }

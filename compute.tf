@@ -1,157 +1,149 @@
-# ─── NIC za Jump Host ────────────────────────────────────────────────────────
+# ─── Jump Host NIC + VM ──────────────────────────────────────────────────────
 resource "azurerm_network_interface" "jump" {
-  name                = "${local.prefix}-nic-jump"
-  resource_group_name = azurerm_resource_group.shared.name
-  location            = azurerm_resource_group.shared.location
-  tags                = local.common_tags
+  name                = "nic-${var.project}-${var.environment}-jump"
+  location            = azurerm_resource_group.core.location
+  resource_group_name = azurerm_resource_group.core.name
+  tags                = local.tags
 
   ip_configuration {
     name                          = "ipconfig"
-    subnet_id                     = azurerm_subnet.mgmt.id
+    subnet_id                     = azurerm_subnet.jump.id
     private_ip_address_allocation = "Dynamic"
     public_ip_address_id          = azurerm_public_ip.jump.id
   }
 }
 
 resource "azurerm_linux_virtual_machine" "jump" {
-  name                = "${local.prefix}-vm-jump"
-  resource_group_name = azurerm_resource_group.shared.name
-  location            = azurerm_resource_group.shared.location
-  size                = var.vm_size_jump
-  admin_username      = var.admin_username
-  tags                = local.common_tags
+  name                  = "vm-${var.project}-${var.environment}-jump"
+  location              = azurerm_resource_group.core.location
+  resource_group_name   = azurerm_resource_group.core.name
+  size                  = var.jump_vm_size
+  admin_username        = var.admin_username
   network_interface_ids = [azurerm_network_interface.jump.id]
+  tags                  = local.tags
 
   admin_ssh_key {
     username   = var.admin_username
-    public_key = var.admin_ssh_public_key
+    public_key = local.ssh_public_key
   }
 
   os_disk {
-    name                 = "${local.prefix}-osdisk-jump"
+    name                 = "disk-${var.project}-${var.environment}-jump-os"
     caching              = "ReadWrite"
-    storage_account_type = "Standard_LRS"
-    disk_size_gb         = 30
+    storage_account_type = "StandardSSD_LRS"
+    disk_size_gb         = var.os_disk_size_gb
   }
 
   source_image_reference {
-    publisher = var.os_image.publisher
-    offer     = var.os_image.offer
-    sku       = var.os_image.sku
-    version   = var.os_image.version
+    publisher = var.image_publisher
+    offer     = var.image_offer
+    sku       = var.image_sku
+    version   = var.image_version
   }
 }
 
-# ─── NIC za DevOps Lead VM ────────────────────────────────────────────────────
-resource "azurerm_network_interface" "lead" {
-  for_each            = local.leads
-  name                = "${local.prefix}-nic-lead-${each.key}"
-  resource_group_name = azurerm_resource_group.shared.name
-  location            = azurerm_resource_group.shared.location
-  tags                = local.common_tags
+# ─── App VM NIC-ovi ──────────────────────────────────────────────────────────
+resource "azurerm_network_interface" "app" {
+  for_each = local.app_instances
+
+  name                = "nic-${each.value.name}"
+  location            = azurerm_resource_group.developer[each.value.dev_key].location
+  resource_group_name = azurerm_resource_group.developer[each.value.dev_key].name
+  tags                = merge(local.tags, { owner = each.value.dev_key })
 
   ip_configuration {
     name                          = "ipconfig"
-    subnet_id                     = azurerm_subnet.mgmt.id
+    subnet_id                     = azurerm_subnet.app[each.value.dev_key].id
     private_ip_address_allocation = "Dynamic"
   }
 }
 
-resource "azurerm_linux_virtual_machine" "lead" {
-  for_each            = local.leads
-  name                = "${local.prefix}-vm-lead-${each.key}"
-  resource_group_name = azurerm_resource_group.shared.name
-  location            = azurerm_resource_group.shared.location
-  size                = var.vm_size_app
-  admin_username      = var.admin_username
-  tags                = merge(local.common_tags, { owner = each.key, role = "devops_lead" })
-  network_interface_ids = [azurerm_network_interface.lead[each.key].id]
+resource "azurerm_network_interface_application_security_group_association" "app" {
+  for_each = local.app_instances
+
+  network_interface_id          = azurerm_network_interface.app[each.key].id
+  application_security_group_id = azurerm_application_security_group.app[each.value.dev_key].id
+}
+
+resource "azurerm_network_interface_backend_address_pool_association" "app" {
+  for_each = local.app_instances
+
+  network_interface_id    = azurerm_network_interface.app[each.key].id
+  ip_configuration_name   = "ipconfig"
+  backend_address_pool_id = azurerm_lb_backend_address_pool.developer[each.value.dev_key].id
+}
+
+# ─── App VM-ovi (2 po developeru za HA) ──────────────────────────────────────
+resource "azurerm_linux_virtual_machine" "app" {
+  for_each = local.app_instances
+
+  name                  = each.value.name
+  location              = azurerm_resource_group.developer[each.value.dev_key].location
+  resource_group_name   = azurerm_resource_group.developer[each.value.dev_key].name
+  size                  = var.app_vm_size
+  admin_username        = var.admin_username
+  network_interface_ids = [azurerm_network_interface.app[each.key].id]
+  tags = merge(local.tags, {
+    owner = each.value.dev_key
+    role  = "moodle"
+  })
+
+  identity {
+    type = "SystemAssigned"
+  }
 
   admin_ssh_key {
     username   = var.admin_username
-    public_key = var.admin_ssh_public_key
+    public_key = local.ssh_public_key
   }
 
-  identity { type = "SystemAssigned" }
-
   os_disk {
-    name                 = "${local.prefix}-osdisk-lead-${each.key}"
+    name                 = "disk-${each.value.name}-os"
     caching              = "ReadWrite"
-    storage_account_type = "Standard_LRS"
-    disk_size_gb         = 30
+    storage_account_type = "StandardSSD_LRS"
+    disk_size_gb         = var.os_disk_size_gb
   }
 
   source_image_reference {
-    publisher = var.os_image.publisher
-    offer     = var.os_image.offer
-    sku       = var.os_image.sku
-    version   = var.os_image.version
+    publisher = var.image_publisher
+    offer     = var.image_offer
+    sku       = var.image_sku
+    version   = var.image_version
   }
+
+  custom_data = base64encode(templatefile("${path.module}/cloud-init-app.yaml.tpl", {
+    admin_username       = var.admin_username
+    instance_name        = each.value.name
+    storage_account_name = azurerm_storage_account.developer[each.value.dev_key].name
+    storage_account_key  = azurerm_storage_account.developer[each.value.dev_key].primary_access_key
+    file_share_name      = azurerm_storage_share.backups[each.value.dev_key].name
+    blob_container_name  = azurerm_storage_container.moodle[each.value.dev_key].name
+  }))
+
+  depends_on = [
+    azurerm_storage_share.backups,
+    azurerm_storage_container.moodle
+  ]
 }
 
-# ─── Dev VM-ovi (1 po developeru zbog vCPU kvote na Students subscriptionu) ──
-resource "azurerm_network_interface" "dev_vm" {
-  for_each            = local.developers
-  name                = "${local.prefix}-nic-${each.key}"
-  resource_group_name = azurerm_resource_group.dev[each.key].name
-  location            = azurerm_resource_group.dev[each.key].location
-  tags                = merge(local.common_tags, { owner = each.key })
+# ─── Data Disk po VM-u ───────────────────────────────────────────────────────
+resource "azurerm_managed_disk" "app_data" {
+  for_each = local.app_instances
 
-  ip_configuration {
-    name                          = "ipconfig"
-    subnet_id                     = azurerm_subnet.dev_app[each.key].id
-    private_ip_address_allocation = "Dynamic"
-  }
-}
-
-resource "azurerm_linux_virtual_machine" "dev_vm" {
-  for_each            = local.developers
-  name                = "${local.prefix}-vm-${each.key}"
-  resource_group_name = azurerm_resource_group.dev[each.key].name
-  location            = azurerm_resource_group.dev[each.key].location
-  size                = var.vm_size_app
-  admin_username      = var.admin_username
-  tags                = merge(local.common_tags, { owner = each.key, role = "developer" })
-  network_interface_ids = [azurerm_network_interface.dev_vm[each.key].id]
-
-  admin_ssh_key {
-    username   = var.admin_username
-    public_key = var.admin_ssh_public_key
-  }
-
-  identity { type = "SystemAssigned" }
-
-  os_disk {
-    name                 = "${local.prefix}-osdisk-${each.key}"
-    caching              = "ReadWrite"
-    storage_account_type = "Standard_LRS"
-    disk_size_gb         = 30
-  }
-
-  source_image_reference {
-    publisher = var.os_image.publisher
-    offer     = var.os_image.offer
-    sku       = var.os_image.sku
-    version   = var.os_image.version
-  }
-}
-
-# ─── Data disk po VM-u ────────────────────────────────────────────────────────
-resource "azurerm_managed_disk" "data" {
-  for_each             = local.developers
-  name                 = "${local.prefix}-datadisk-${each.key}"
-  resource_group_name  = azurerm_resource_group.dev[each.key].name
-  location             = azurerm_resource_group.dev[each.key].location
-  storage_account_type = "Standard_LRS"
+  name                 = "disk-${each.value.name}-data"
+  location             = azurerm_resource_group.developer[each.value.dev_key].location
+  resource_group_name  = azurerm_resource_group.developer[each.value.dev_key].name
+  storage_account_type = "StandardSSD_LRS"
   create_option        = "Empty"
-  disk_size_gb         = 32
-  tags                 = merge(local.common_tags, { owner = each.key })
+  disk_size_gb         = var.data_disk_size_gb
+  tags                 = merge(local.tags, { owner = each.value.dev_key })
 }
 
-resource "azurerm_virtual_machine_data_disk_attachment" "data" {
-  for_each           = local.developers
-  managed_disk_id    = azurerm_managed_disk.data[each.key].id
-  virtual_machine_id = azurerm_linux_virtual_machine.dev_vm[each.key].id
+resource "azurerm_virtual_machine_data_disk_attachment" "app_data" {
+  for_each = local.app_instances
+
+  managed_disk_id    = azurerm_managed_disk.app_data[each.key].id
+  virtual_machine_id = azurerm_linux_virtual_machine.app[each.key].id
   lun                = 0
   caching            = "ReadWrite"
 }
