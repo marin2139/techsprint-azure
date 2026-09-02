@@ -1,4 +1,4 @@
-ime;prezime;rola
-ana;anic;devops_lead
-luka;lukic;developer
-marko;markovic;developer
+ime;prezime;rola;azure_ad_object_id
+ana;anic;devops_lead;af4274ec-9b5b-4d6c-bdac-88f3a56c350f
+luka;lukic;developer;af4274ec-9b5b-4d6c-bdac-88f3a56c350f
+marko;markovic;developer;af4274ec-9b5b-4d6c-bdac-88f3a56c350f
