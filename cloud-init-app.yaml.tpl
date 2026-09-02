@@ -13,7 +13,9 @@ packages:
   - php-zip
   - cifs-utils
   - fuse3
-  - blobfuse2
+  # NAPOMENA: blobfuse2 NIJE u standardnim Ubuntu apt repozitorijima, pa ga
+  # ovdje ne stavljamo u "packages" (to je pucalo - PackageInstallerError).
+  # Instalira se u runcmd nakon dodavanja Microsoftovog apt repozitorija.
 
 write_files:
   # ── Blob (objektna pohrana) - montiran preko blobfuse2 s Managed Identity ──
@@ -74,6 +76,12 @@ write_files:
       WantedBy=multi-user.target
 
 runcmd:
+  # Dodaj Microsoftov apt repo pa instaliraj blobfuse2 (nije u Ubuntu repou)
+  - curl -sSL -o /tmp/packages-microsoft-prod.deb https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb
+  - dpkg -i /tmp/packages-microsoft-prod.deb
+  - rm -f /tmp/packages-microsoft-prod.deb
+  - apt-get update
+  - apt-get install -y blobfuse2
   - mkdir -p /mnt/blobfusetmp/${instance_name}
   - mkdir -p /mnt/moodle-objects
   - mkdir -p /mnt/moodle-backups
