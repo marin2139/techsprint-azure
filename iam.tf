@@ -30,12 +30,41 @@ resource "azurerm_role_assignment" "app_blob_data_contributor" {
   principal_id         = azurerm_linux_virtual_machine.app[each.key].identity[0].principal_id
 }
 
-# NOTE: Role assignments za developere i lead korisnike trebaju principal_object_id
-# iz Azure AD. Ako imaš AAD korisnike, dodaj ih u CSV kao 4. stupac i otkomentiraj:
-#
-# resource "azurerm_role_assignment" "developer_power" {
-#   for_each = { for k, v in local.developers : k => v if v.principal_object_id != "" }
-#   scope              = azurerm_resource_group.developer[each.key].id
-#   role_definition_id = azurerm_role_definition.vm_power_operator.role_definition_resource_id
-#   principal_id       = each.value.principal_object_id
-# }
+# ─── RBAC: Developeri → custom rola, ograničeno na VLASTITU resource grupu ───
+# Least-privilege: developer smije Start/Restart/Deallocate SAMO svoje VM-ove
+# (scope je resource grupa tog developera, ne cijela pretplata).
+resource "azurerm_role_assignment" "developer_power" {
+  for_each = { for k, v in local.developers : k => v if v.principal_object_id != "" }
+
+  scope              = azurerm_resource_group.developer[each.key].id
+  role_definition_id = azurerm_role_definition.vm_power_operator.role_definition_resource_id
+  principal_id       = each.value.principal_object_id
+}
+
+# ─── RBAC: DevOps Lead → custom rola preko SVIH developerskih resource grupa ─
+# Voditelj smije Start/Restart/Deallocate bilo koji VM u projektu, ali i dalje
+# bez punih Owner/Contributor ovlasti (nema npr. brisanja resursa, mreže, IAM-a).
+resource "azurerm_role_assignment" "lead_power" {
+  for_each = {
+    for pair in setproduct(
+      [for k, v in local.leads : k if v.principal_object_id != ""],
+      keys(local.developers)
+    ) : "${pair[0]}-${pair[1]}" => {
+      lead_key = pair[0]
+      dev_key  = pair[1]
+    }
+  }
+
+  scope              = azurerm_resource_group.developer[each.value.dev_key].id
+  role_definition_id = azurerm_role_definition.vm_power_operator.role_definition_resource_id
+  principal_id       = local.leads[each.value.lead_key].principal_object_id
+}
+
+# Lead dodatno vidi i core RG (Jump Host, vlastiti Lead VM)
+resource "azurerm_role_assignment" "lead_power_core" {
+  for_each = { for k, v in local.leads : k => v if v.principal_object_id != "" }
+
+  scope              = azurerm_resource_group.core.id
+  role_definition_id = azurerm_role_definition.vm_power_operator.role_definition_resource_id
+  principal_id       = each.value.principal_object_id
+}

@@ -38,12 +38,17 @@ variable "allowed_ssh_cidr" {
 
 variable "app_vm_size" {
   type    = string
-  default = "Standard_B1s"
+  default = "Standard_B2s"
 }
 
 variable "jump_vm_size" {
   type    = string
-  default = "Standard_B1s"
+  default = "Standard_B2s"
+}
+
+variable "lead_vm_size" {
+  type    = string
+  default = "Standard_B2s"
 }
 
 variable "os_disk_size_gb" {

@@ -3,6 +3,13 @@ output "jump_public_ip" {
   value       = azurerm_public_ip.jump.ip_address
 }
 
+output "lead_private_ips" {
+  description = "Privatne IP adrese Lead VM-ova (dostupno samo preko Jump Hosta)"
+  value = {
+    for key, nic in azurerm_network_interface.lead : key => nic.private_ip_address
+  }
+}
+
 output "developer_load_balancers" {
   description = "Interne LB IP adrese po developeru"
   value = {

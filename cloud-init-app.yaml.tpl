@@ -1,112 +1,93 @@
 #cloud-config
 package_update: true
+package_upgrade: false
+
 packages:
-  - curl
-  - ca-certificates
+  - apache2
+  - php
+  - php-mysql
+  - php-xml
+  - php-curl
+  - php-gd
+  - php-mbstring
+  - php-zip
   - cifs-utils
+  - fuse3
+  - blobfuse2
 
 write_files:
-  - path: /opt/techsprint/install.sh
-    permissions: "0755"
-    owner: root:root
+  # ── Blob (objektna pohrana) - montiran preko blobfuse2 s Managed Identity ──
+  # Nema tajni na disku: autentikacija ide preko System Assigned MSI VM-a,
+  # koji ima ulogu "Storage Blob Data Contributor" na storage accountu
+  # (vidi iam.tf -> azurerm_role_assignment.app_blob_data_contributor).
+  - path: /etc/blobfuse2/moodle-objects.yaml
+    permissions: '0600'
     content: |
-      #!/usr/bin/env bash
-      set -euxo pipefail
-      export DEBIAN_FRONTEND=noninteractive
+      logging:
+        type: syslog
+        level: log_warning
+      components:
+        - libfuse
+        - file_cache
+        - attr_cache
+        - azstorage
+      libfuse:
+        attribute-expiration-sec: 120
+        entry-expiration-sec: 120
+      file_cache:
+        path: /mnt/blobfusetmp/${instance_name}
+        timeout-sec: 120
+      azstorage:
+        type: block
+        account-name: ${storage_account_name}
+        container: ${blob_container_name}
+        endpoint: https://${storage_account_name}.blob.${azure_storage_dns_suffix}
+        mode: msi
 
-      mkdir -p /data /mnt/azurefiles /opt/moodle
-
-      # --- Data disk (LUN 0) -> /data ---
-      DATA_DISK="/dev/disk/azure/scsi1/lun0"
-      if [ -b "$DATA_DISK" ] && ! blkid "$DATA_DISK"; then
-        mkfs.ext4 -F "$DATA_DISK"
-      fi
-      if [ -b "$DATA_DISK" ] && ! grep -q " /data " /etc/fstab; then
-        echo "$DATA_DISK /data ext4 defaults,nofail 0 2" >> /etc/fstab
-        mount /data
-      fi
-
-      # --- Azure Files (SMB) -> /mnt/azurefiles ---
-      if ! grep -q "/mnt/azurefiles" /etc/fstab; then
-        mkdir -p /etc/smbcredentials
-        cat > /etc/smbcredentials/${storage_account_name}.cred <<'CREDS'
+  # ── File Share (backupi) - montiran preko SMB sa SAS tokenom ──────────────
+  # Umjesto storage account ključa koristi se vremenski ograničen SAS token
+  # (services=file only) generiran u storage.tf, jer Azure Files SMB na
+  # Linuxu bez Azure AD Kerberos domain-joina ne podržava Managed Identity.
+  - path: /etc/smbcredentials/${instance_name}.cred
+    permissions: '0600'
+    content: |
       username=${storage_account_name}
-      password=${storage_account_key}
-      CREDS
-        chmod 600 /etc/smbcredentials/${storage_account_name}.cred
-        echo "//${storage_account_name}.file.core.windows.net/${file_share_name} /mnt/azurefiles cifs nofail,credentials=/etc/smbcredentials/${storage_account_name}.cred,dir_mode=0770,file_mode=0660,serverino,nosharesock,actimeo=30" >> /etc/fstab
-        mount /mnt/azurefiles || true
-      fi
+      password=${file_share_sas_token}
 
-      # --- Docker ---
-      if command -v apt-get >/dev/null 2>&1; then
-        apt-get update
-        apt-get install -y ca-certificates curl gnupg
-        install -m 0755 -d /etc/apt/keyrings
-        if [ ! -f /etc/apt/keyrings/docker.asc ]; then
-          curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-          chmod a+r /etc/apt/keyrings/docker.asc
-        fi
-        . /etc/os-release
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $${VERSION_CODENAME} stable" > /etc/apt/sources.list.d/docker.list
-        apt-get update
-        apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin \
-          || apt-get install -y docker.io docker-compose-v2
-        systemctl enable --now docker
-      fi
+  # systemd unit za blobfuse2 (preživljava reboot, za razliku od jednokratnog
+  # runcmd mounta), pokreće se nakon network-online.target
+  - path: /etc/systemd/system/blobfuse2-moodle.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=blobfuse2 mount za moodle-objects (MSI auth)
+      After=network-online.target
+      Wants=network-online.target
 
-      # --- Moodle data dirs ---
-      mkdir -p /data/mariadb /data/moodle
-      chown -R 1001:1001 /data/mariadb /data/moodle
+      [Service]
+      Type=forking
+      ExecStart=/usr/bin/blobfuse2 mount /mnt/moodle-objects --config-file=/etc/blobfuse2/moodle-objects.yaml
+      ExecStop=/usr/bin/blobfuse2 unmount /mnt/moodle-objects
+      Restart=on-failure
 
-      cat > /opt/moodle/docker-compose.yml <<'COMPOSE'
-      services:
-        mariadb:
-          image: docker.io/bitnamilegacy/mariadb:11.4
-          restart: unless-stopped
-          environment:
-            - MARIADB_ROOT_PASSWORD=Moodle_Root_Pass_123
-            - MARIADB_USER=bn_moodle
-            - MARIADB_PASSWORD=Moodle_Db_Pass_123
-            - MARIADB_DATABASE=bitnami_moodle
-            - MARIADB_CHARACTER_SET=utf8mb4
-            - MARIADB_COLLATE=utf8mb4_unicode_ci
-          volumes:
-            - /data/mariadb:/bitnami/mariadb
-          healthcheck:
-            test: ["CMD-SHELL", "mysqladmin ping -uroot -pMoodle_Root_Pass_123 --silent"]
-            interval: 15s
-            timeout: 10s
-            retries: 20
-            start_period: 60s
-        moodle:
-          image: docker.io/bitnamilegacy/moodle:4.5
-          restart: unless-stopped
-          ports:
-            - "80:8080"
-          environment:
-            - MOODLE_DATABASE_TYPE=mariadb
-            - MOODLE_DATABASE_HOST=mariadb
-            - MOODLE_DATABASE_PORT_NUMBER=3306
-            - MOODLE_DATABASE_USER=bn_moodle
-            - MOODLE_DATABASE_PASSWORD=Moodle_Db_Pass_123
-            - MOODLE_DATABASE_NAME=bitnami_moodle
-            - MOODLE_USERNAME=admin
-            - MOODLE_PASSWORD=Moodle_Admin_123
-            - MOODLE_EMAIL=admin@example.com
-          volumes:
-            - /data/moodle:/bitnami/moodle
-            - /mnt/azurefiles:/mnt/azurefiles
-          depends_on:
-            mariadb:
-              condition: service_healthy
-      COMPOSE
-
-      if docker compose version >/dev/null 2>&1; then
-        docker compose -f /opt/moodle/docker-compose.yml up -d
-      elif command -v docker-compose >/dev/null 2>&1; then
-        docker-compose -f /opt/moodle/docker-compose.yml up -d
-      fi
+      [Install]
+      WantedBy=multi-user.target
 
 runcmd:
-  - /opt/techsprint/install.sh
+  - mkdir -p /mnt/blobfusetmp/${instance_name}
+  - mkdir -p /mnt/moodle-objects
+  - mkdir -p /mnt/moodle-backups
+  - chown -R www-data:www-data /mnt/moodle-objects /mnt/moodle-backups
+  # File share mount preko SAS tokena (bez storage account ključa), trajno u fstab-u
+  - >
+    echo "//${storage_account_name}.file.${azure_storage_dns_suffix}/${file_share_name}
+    /mnt/moodle-backups cifs credentials=/etc/smbcredentials/${instance_name}.cred,serverino,nosharesock,mfsymlinks,vers=3.0,_netdev 0 0" >> /etc/fstab
+  - mount /mnt/moodle-backups
+  # Blob mount preko systemd servisa (MSI auth, auto-remount kod reboota)
+  - systemctl daemon-reload
+  - systemctl enable --now blobfuse2-moodle.service
+  - systemctl enable apache2
+  - systemctl restart apache2
+
+# NAPOMENA: SAS token vrijedi 1 godinu (storage.tf) - potrebna je rotacija
+# (novi terraform apply nakon isteka) jer se ne obnavlja automatski.

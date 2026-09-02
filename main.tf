@@ -9,7 +9,10 @@ resource "random_string" "suffix" {
   upper   = false
 }
 
-# ─── CSV parsing (ime;prezime;rola) ──────────────────────────────────────────
+# ─── CSV parsing (ime;prezime;rola;azure_ad_object_id) ───────────────────────
+# 4. stupac (azure_ad_object_id) je opcionalan - Object ID korisnika u Azure AD,
+# potreban za RBAC dodjele (iam.tf). Bez njega se za tog korisnika ne kreira
+# nikakva role assignment (vidi filter "if principal_object_id != \"\"").
 locals {
   tags = {
     project     = var.project
@@ -26,10 +29,11 @@ locals {
 
   users = [
     for line in local.csv_lines : {
-      ime     = lower(trimspace(split(";", line)[0]))
-      prezime = lower(trimspace(split(";", line)[1]))
-      rola    = lower(trimspace(split(";", line)[2]))
-      key     = "${lower(trimspace(split(";", line)[0]))}-${lower(trimspace(split(";", line)[1]))}"
+      ime                  = lower(trimspace(split(";", line)[0]))
+      prezime              = lower(trimspace(split(";", line)[1]))
+      rola                 = lower(trimspace(split(";", line)[2]))
+      key                  = "${lower(trimspace(split(";", line)[0]))}-${lower(trimspace(split(";", line)[1]))}"
+      principal_object_id  = length(split(";", line)) > 3 ? trimspace(split(";", line)[3]) : ""
     }
   ]
 
@@ -48,10 +52,10 @@ locals {
     if user.rola == "devops_lead"
   }
 
-  # 1 Moodle VM po developeru (Azure for Students vCPU kvota = 4)
+  # 2 Moodle VM-a po developeru (HA iza internog LB-a)
   app_instances = merge([
     for dev_key, dev in local.developers : {
-      for n in [1] : "${dev_key}-app${n}" => {
+      for n in [1, 2] : "${dev_key}-app${n}" => {
         dev_key         = dev_key
         instance_number = n
         name            = "vm-${var.project}-${dev.ime}${dev.prezime}-app${n}"

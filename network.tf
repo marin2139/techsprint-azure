@@ -14,6 +14,13 @@ resource "azurerm_subnet" "jump" {
   address_prefixes     = [cidrsubnet(var.lead_vnet_cidr, 8, 1)]
 }
 
+resource "azurerm_subnet" "lead" {
+  name                 = "snet-lead"
+  resource_group_name  = azurerm_resource_group.core.name
+  virtual_network_name = azurerm_virtual_network.lead.name
+  address_prefixes     = [cidrsubnet(var.lead_vnet_cidr, 8, 2)]
+}
+
 # ─── Developer VNets ─────────────────────────────────────────────────────────
 resource "azurerm_virtual_network" "developer" {
   for_each = local.developers
@@ -82,6 +89,31 @@ resource "azurerm_network_security_group" "jump" {
 resource "azurerm_subnet_network_security_group_association" "jump" {
   subnet_id                 = azurerm_subnet.jump.id
   network_security_group_id = azurerm_network_security_group.jump.id
+}
+
+# ─── NSG: Lead VM (bez javnog IP-a, SSH samo preko Jump Hosta) ───────────────
+resource "azurerm_network_security_group" "lead" {
+  name                = "nsg-${var.project}-${var.environment}-lead"
+  location            = azurerm_resource_group.core.location
+  resource_group_name = azurerm_resource_group.core.name
+  tags                = local.tags
+
+  security_rule {
+    name                       = "Allow-SSH-From-Jump-Subnet"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "22"
+    source_address_prefix      = cidrsubnet(var.lead_vnet_cidr, 8, 1)
+    destination_address_prefix = "*"
+  }
+}
+
+resource "azurerm_subnet_network_security_group_association" "lead" {
+  subnet_id                 = azurerm_subnet.lead.id
+  network_security_group_id = azurerm_network_security_group.lead.id
 }
 
 # ─── NSG: App Subnets ────────────────────────────────────────────────────────
@@ -185,10 +217,13 @@ resource "azurerm_lb_backend_address_pool" "developer" {
 resource "azurerm_lb_probe" "developer" {
   for_each = local.developers
 
-  name            = "probe-http"
-  loadbalancer_id = azurerm_lb.developer[each.key].id
-  protocol        = "Tcp"
-  port            = 80
+  name                = "probe-http"
+  loadbalancer_id     = azurerm_lb.developer[each.key].id
+  protocol            = "Http"
+  port                = 80
+  request_path        = "/login/index.php"
+  interval_in_seconds = 5
+  number_of_probes    = 2
 }
 
 resource "azurerm_lb_rule" "developer" {

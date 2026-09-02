@@ -42,6 +42,57 @@ resource "azurerm_linux_virtual_machine" "jump" {
   }
 }
 
+# ─── Lead VM NIC + VM (bez javnog IP-a, pristup preko Jump Hosta) ───────────
+resource "azurerm_network_interface" "lead" {
+  for_each = local.leads
+
+  name                = "nic-vm-${var.project}-${var.environment}-${each.value.ime}${each.value.prezime}-lead"
+  location            = azurerm_resource_group.core.location
+  resource_group_name = azurerm_resource_group.core.name
+  tags                = merge(local.tags, { owner = each.key })
+
+  ip_configuration {
+    name                          = "ipconfig"
+    subnet_id                     = azurerm_subnet.lead.id
+    private_ip_address_allocation = "Dynamic"
+  }
+}
+
+resource "azurerm_linux_virtual_machine" "lead" {
+  for_each = local.leads
+
+  name                  = "vm-${var.project}-${var.environment}-${each.value.ime}${each.value.prezime}-lead"
+  location              = azurerm_resource_group.core.location
+  resource_group_name   = azurerm_resource_group.core.name
+  size                  = var.lead_vm_size
+  admin_username        = var.admin_username
+  network_interface_ids = [azurerm_network_interface.lead[each.key].id]
+  tags                  = merge(local.tags, { owner = each.key, role = "devops_lead" })
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  admin_ssh_key {
+    username   = var.admin_username
+    public_key = local.ssh_public_key
+  }
+
+  os_disk {
+    name                 = "disk-${var.project}-${var.environment}-${each.value.ime}${each.value.prezime}-lead-os"
+    caching              = "ReadWrite"
+    storage_account_type = "StandardSSD_LRS"
+    disk_size_gb         = var.os_disk_size_gb
+  }
+
+  source_image_reference {
+    publisher = var.image_publisher
+    offer     = var.image_offer
+    sku       = var.image_sku
+    version   = var.image_version
+  }
+}
+
 # ─── App VM NIC-ovi ──────────────────────────────────────────────────────────
 resource "azurerm_network_interface" "app" {
   for_each = local.app_instances
@@ -112,12 +163,13 @@ resource "azurerm_linux_virtual_machine" "app" {
   }
 
   custom_data = base64encode(templatefile("${path.module}/cloud-init-app.yaml.tpl", {
-    admin_username       = var.admin_username
-    instance_name        = each.value.name
-    storage_account_name = azurerm_storage_account.developer[each.value.dev_key].name
-    storage_account_key  = azurerm_storage_account.developer[each.value.dev_key].primary_access_key
-    file_share_name      = azurerm_storage_share.backups[each.value.dev_key].name
-    blob_container_name  = azurerm_storage_container.moodle[each.value.dev_key].name
+    admin_username        = var.admin_username
+    instance_name         = each.value.name
+    storage_account_name  = azurerm_storage_account.developer[each.value.dev_key].name
+    file_share_name       = azurerm_storage_share.backups[each.value.dev_key].name
+    file_share_sas_token  = data.azurerm_storage_account_sas.backups[each.value.dev_key].sas
+    blob_container_name   = azurerm_storage_container.moodle[each.value.dev_key].name
+    azure_storage_dns_suffix = "core.windows.net"
   }))
 
   depends_on = [
