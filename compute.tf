@@ -158,7 +158,7 @@ resource "azurerm_linux_virtual_machine" "app" {
   source_image_reference {
     publisher = var.image_publisher
     offer     = var.image_offer
-    sku       = var.image_sku
+    sku       = var.app_image_sku
     version   = var.image_version
   }
 

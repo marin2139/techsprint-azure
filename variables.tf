@@ -41,10 +41,13 @@ variable "app_vm_size" {
   # for Students pretplate. "standardBSFamily" (B1s/B2s/...) ima zaseban
   # strop od 4 vCPU koji Jump+Lead VM (2x B1s) + prva dva Moodle VM-a već
   # potpuno potroše, pa preostala dva Moodle VM-a (HA za 2. developera) NE
-  # STANU u istu obitelj čak ni na B1s. Standard_A1_v2 je u zasebnoj "Standard
-  # A0-A7 Family" kvoti (odvojen limit, prazan), pa svi Moodle VM-ovi idu
-  # tamo umjesto u B-obitelj - time cijela topologija (Jump+Lead+4xMoodle =
+  # STANU u istu obitelj čak ni na B1s. Standard_A1_v2 je u zasebnoj "Av2
+  # Family" kvoti (odvojen limit, prazan), pa svi Moodle VM-ovi idu tamo
+  # umjesto u B-obitelj - time cijela topologija (Jump+Lead+4xMoodle =
   # 6 VM-ova, sve po 1 vCPU) stane u ukupni regionalni limit od 6 vCPU.
+  # NAPOMENA 2: Standard_A1_v2 je Hyper-V Generation 1 VM (ne podržava Gen2
+  # boot), pa Moodle VM-ovi koriste var.app_image_sku (Gen1 slika), dok
+  # Jump/Lead ostaju na var.image_sku (Gen2) - vidi compute.tf.
   # U produkciji s normalnom kvotom: Standard_B2s / Standard_D2s_v3.
   type    = string
   default = "Standard_A1_v2"
@@ -83,6 +86,12 @@ variable "image_offer" {
 variable "image_sku" {
   type    = string
   default = "22_04-lts-gen2"
+}
+
+variable "app_image_sku" {
+  description = "Gen1 slika za Moodle VM-ove (Standard_A1_v2 ne podržava Gen2 boot)"
+  type        = string
+  default     = "22_04-lts"
 }
 
 variable "image_version" {
