@@ -35,6 +35,14 @@ resource "azurerm_storage_share" "backups" {
 # ─── SAS token za File Share mount (Azure Files SMB ne podržava Managed ──────
 # Identity na Linuxu bez AD Kerberos-a, pa se umjesto sirovog storage account
 # ključa koristi vremenski ograničen, na file servis suženi SAS token) ────────
+#
+# NAPOMENA: start/expiry su namjerno FIKSNI datumi, ne timestamp(). Da su
+# dinamični (timestamp() se mijenja svaki put kad se pokrene plan/apply), SAS
+# token bi se mijenjao pri svakom apply-u, a custom_data VM-a bi se time
+# stalno "mijenjao" i tražio re-provisioning. lifecycle.ignore_changes ovdje
+# ne postoji jer je to "data" izvor, ne "resource" - Terraform ga ionako
+# uvijek iznova čita, pa fiksni datumi rješavaju problem u korijenu.
+# Prije isteka (expiry) treba ručno produžiti datum u varijablama ispod.
 data "azurerm_storage_account_sas" "backups" {
   for_each = local.developers
 
@@ -54,8 +62,8 @@ data "azurerm_storage_account_sas" "backups" {
     file  = true
   }
 
-  start  = timestamp()
-  expiry = timeadd(timestamp(), "8760h") # 1 godina
+  start  = "2025-01-01T00:00:00Z"
+  expiry = "2027-01-01T00:00:00Z"
 
   permissions {
     read    = true
@@ -68,9 +76,5 @@ data "azurerm_storage_account_sas" "backups" {
     process = false
     tag     = false
     filter  = false
-  }
-
-  lifecycle {
-    ignore_changes = [start, expiry]
   }
 }
