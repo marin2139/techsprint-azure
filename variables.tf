@@ -37,18 +37,22 @@ variable "allowed_ssh_cidr" {
 }
 
 variable "app_vm_size" {
+  # NAPOMENA: B1s (1 vCPU) je izbor zbog Total Regional vCPUs kvote testne
+  # Azure for Students pretplate (limit = 6 vCPU regionalno). Uz Lead VM i
+  # HA (2 Moodle VM-a po developeru) treba 6 VM-ova ukupno, pa svih 6 mora
+  # biti na 1 vCPU da stane u kvotu. U produkciji: Standard_B2s / D2s_v3.
   type    = string
-  default = "Standard_B2s"
+  default = "Standard_B1s"
 }
 
 variable "jump_vm_size" {
   type    = string
-  default = "Standard_B2s"
+  default = "Standard_B1s"
 }
 
 variable "lead_vm_size" {
   type    = string
-  default = "Standard_B2s"
+  default = "Standard_B1s"
 }
 
 variable "os_disk_size_gb" {
