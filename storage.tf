@@ -32,49 +32,14 @@ resource "azurerm_storage_share" "backups" {
   quota                = 50
 }
 
-# ─── SAS token za File Share mount (Azure Files SMB ne podržava Managed ──────
-# Identity na Linuxu bez AD Kerberos-a, pa se umjesto sirovog storage account
-# ključa koristi vremenski ograničen, na file servis suženi SAS token) ────────
-#
-# NAPOMENA: start/expiry su namjerno FIKSNI datumi, ne timestamp(). Da su
-# dinamični (timestamp() se mijenja svaki put kad se pokrene plan/apply), SAS
-# token bi se mijenjao pri svakom apply-u, a custom_data VM-a bi se time
-# stalno "mijenjao" i tražio re-provisioning. lifecycle.ignore_changes ovdje
-# ne postoji jer je to "data" izvor, ne "resource" - Terraform ga ionako
-# uvijek iznova čita, pa fiksni datumi rješavaju problem u korijenu.
-# Prije isteka (expiry) treba ručno produžiti datum u varijablama ispod.
-data "azurerm_storage_account_sas" "backups" {
-  for_each = local.developers
-
-  connection_string = azurerm_storage_account.developer[each.key].primary_connection_string
-  https_only        = true
-
-  resource_types {
-    service   = true
-    container = true
-    object    = true
-  }
-
-  services {
-    blob  = false
-    queue = false
-    table = false
-    file  = true
-  }
-
-  start  = "2025-01-01T00:00:00Z"
-  expiry = "2027-01-01T00:00:00Z"
-
-  permissions {
-    read    = true
-    write   = true
-    delete  = false
-    list    = true
-    add     = true
-    create  = true
-    update  = true
-    process = false
-    tag     = false
-    filter  = false
-  }
-}
+# ─── File Share mount: storage account ključ (jedina opcija za SMB) ──────────
+# NAPOMENA: pokušali smo SAS token za mount.cifs (kao za Blob preko MSI), ali
+# Azure Files SMB protokol (mount -t cifs) ne podržava SAS token kao lozinku -
+# to je dokumentirano Azure ograničenje, ne propust u dizajnu. SMB basic auth
+# prihvaća SAMO storage account ključ ili Azure AD Kerberos (zahtijeva domain
+# join, prekompleksno za ovaj scenarij). Least-privilege je ovdje osiguran na
+# drugoj razini: ključ je vezan za storage account TOG developera (nije
+# dijeljen), čita se samo unutar cloud-init-a i sprema na disk s 0600
+# dozvolama (vidi cloud-init-app.yaml.tpl). Blob i dalje ide isključivo preko
+# Managed Identity (bez ikakve tajne) - vidi source_image_reference blok i
+# azurerm_role_assignment.app_blob_data_contributor u iam.tf.

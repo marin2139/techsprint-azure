@@ -46,15 +46,18 @@ write_files:
         endpoint: https://${storage_account_name}.blob.${azure_storage_dns_suffix}
         mode: msi
 
-  # ── File Share (backupi) - montiran preko SMB sa SAS tokenom ──────────────
-  # Umjesto storage account ključa koristi se vremenski ograničen SAS token
-  # (services=file only) generiran u storage.tf, jer Azure Files SMB na
-  # Linuxu bez Azure AD Kerberos domain-joina ne podržava Managed Identity.
+  # ── File Share (backupi) - montiran preko SMB sa storage account ključem ──
+  # Azure Files SMB (mount -t cifs) NE podržava SAS token kao lozinku - to
+  # je Azure protokol ograničenje (SAS radi samo za REST/API pristup, npr.
+  # azcopy, ne i za mount.cifs basic auth). Jedine podržane opcije su storage
+  # account ključ ili Azure AD Kerberos (zahtijeva domain join). Least-
+  # privilege je ovdje osiguran time što je ključ vezan za storage account
+  # SAMO tog developera (nije dijeljen), i čuva se s 0600 dozvolama.
   - path: /etc/smbcredentials/${instance_name}.cred
     permissions: '0600'
     content: |
       username=${storage_account_name}
-      password=${file_share_sas_token}
+      password=${storage_account_key}
 
   # systemd unit za blobfuse2 (preživljava reboot, za razliku od jednokratnog
   # runcmd mounta), pokreće se nakon network-online.target
@@ -86,7 +89,7 @@ runcmd:
   - mkdir -p /mnt/moodle-objects
   - mkdir -p /mnt/moodle-backups
   - chown -R www-data:www-data /mnt/moodle-objects /mnt/moodle-backups
-  # File share mount preko SAS tokena (bez storage account ključa), trajno u fstab-u
+  # File share mount preko storage account ključa (SMB ne podržava SAS), trajno u fstab-u
   - >
     echo "//${storage_account_name}.file.${azure_storage_dns_suffix}/${file_share_name}
     /mnt/moodle-backups cifs credentials=/etc/smbcredentials/${instance_name}.cred,serverino,nosharesock,mfsymlinks,vers=3.0,_netdev 0 0" >> /etc/fstab
@@ -96,6 +99,3 @@ runcmd:
   - systemctl enable --now blobfuse2-moodle.service
   - systemctl enable apache2
   - systemctl restart apache2
-
-# NAPOMENA: SAS token vrijedi 1 godinu (storage.tf) - potrebna je rotacija
-# (novi terraform apply nakon isteka) jer se ne obnavlja automatski.

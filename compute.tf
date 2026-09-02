@@ -163,12 +163,12 @@ resource "azurerm_linux_virtual_machine" "app" {
   }
 
   custom_data = base64encode(templatefile("${path.module}/cloud-init-app.yaml.tpl", {
-    admin_username        = var.admin_username
-    instance_name         = each.value.name
-    storage_account_name  = azurerm_storage_account.developer[each.value.dev_key].name
-    file_share_name       = azurerm_storage_share.backups[each.value.dev_key].name
-    file_share_sas_token  = data.azurerm_storage_account_sas.backups[each.value.dev_key].sas
-    blob_container_name   = azurerm_storage_container.moodle[each.value.dev_key].name
+    admin_username           = var.admin_username
+    instance_name            = each.value.name
+    storage_account_name     = azurerm_storage_account.developer[each.value.dev_key].name
+    storage_account_key      = azurerm_storage_account.developer[each.value.dev_key].primary_access_key
+    file_share_name          = azurerm_storage_share.backups[each.value.dev_key].name
+    blob_container_name      = azurerm_storage_container.moodle[each.value.dev_key].name
     azure_storage_dns_suffix = "core.windows.net"
   }))
 
